@@ -1,0 +1,165 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Board Editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap"><link rel="stylesheet" href="style.css"></head><body>
+<main class="wrap">
+<h1>Board Editor</h1>
+<section id="login" class="card center narrow" hidden></section>
+<div id="app" hidden>
+ <div class="card">
+  <div class="row"><select id="sel"></select><span id="newbtns"></span><button id="dup" class="bad">Duplicate</button><button id="del" class="bad">Delete</button></div>
+  <div class="row"><label class="small">Import JSON <input id="imp" type="file" accept=".json"></label><button id="exp" class="bad">Export</button><a href="host.html">← Host panel</a><button id="out" class="bad">Sign out</button></div>
+ </div>
+ <div id="ed" hidden>
+  <div class="card row"><input id="bn" class="grow" placeholder="Board name"><span id="opts" class="opts"></span><button id="save" class="good">Save</button><span id="msg" class="small"></span></div>
+  <div id="cats"></div>
+  <input id="file" type="file" hidden>
+  <button id="cola" class="bad">Collapse all</button><button id="expa" class="bad">Expand all</button> <button id="addcat">+ Add category</button>
+ </div>
+</div>
+</main>
+<script type="module">
+import { set, push, remove, onValue, LIB, $, auth, signOut, hostLogin, esc, norm, setHtml, MODES, modeOf } from "./common.js";
+
+let lib = {}, id = null, cur = null, dirty = false, upK = null;   // lib: all boards · id/cur: the board being edited · dirty: unsaved edits
+
+// ----- unsaved-changes guard -----
+const touch = () => { dirty = true; $("msg").textContent = ""; };
+const leave = () => !dirty || confirm("You have unsaved changes. Discard them?");
+addEventListener("beforeunload", e => { if (dirty) e.preventDefault(); });
+
+// ----- board list -----
+hostLogin(() => onValue(LIB("boards"), s => { lib = s.val() || {}; fill(); }));
+function fill() {
+  const keys = Object.keys(lib);
+  if (id && !lib[id]) { id = null; cur = null; dirty = false; }
+  if (!id && keys.length) { id = keys[0]; cur = structuredClone(norm(lib[id])); }
+  setHtml($("sel"), keys.map(k => `<option value="${k}" ${k === id ? "selected" : ""}>${esc(lib[k].name)}${modeOf(lib[k]).tag}</option>`).join(""));
+  $("sel").value = id || "";
+  draw();
+}
+async function add(b) {
+  const n = push(LIB("boards")); await set(n, b);
+  id = n.key; cur = structuredClone(norm(b)); dirty = false; fill();
+}
+
+// ----- uploads: images shrunk to 900px, audio up to 1.5 MB, stored as data URLs in library/media -----
+const shrink = f => new Promise((res, rej) => {
+  const im = new Image();
+  im.onload = () => { const z = Math.min(1, 900 / Math.max(im.width, im.height)), cv = document.createElement("canvas"); cv.width = im.width * z; cv.height = im.height * z; cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height); res(cv.toDataURL("image/jpeg", .75)); };
+  im.onerror = () => rej(new Error("Couldn't read that image.")); im.src = URL.createObjectURL(f);
+});
+const readAudio = f => new Promise((res, rej) => {
+  if (f.size > 1.5e6) return rej(new Error("Audio is over 1.5 MB. Trim it, or paste a link instead."));
+  const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f);
+});
+
+// ----- markup helpers -----
+// D("answer", i, j) -> data-c="i" data-q="j" data-f="answer": tells the input handler which field of which object it edits
+const D = (f, ...ix) => ["c", "q", "i"].slice(0, ix.length).map((k, n) => `data-${k}="${ix[n]}"`).join(" ") + ` data-f="${f}"`;
+const TYPES = ["text", "image", "audio"];
+const opts = (list, sel) => list.map(t => `<option${t === sel ? " selected" : ""}>${t}</option>`).join("");
+const X = (k, label = "✕") => `<button class="bad" data-x="${k}">${label}</button>`;     // remove / add buttons: data-x = <action letter><indexes>
+const DL = (i, j) => `data-dl="c${i}" data-di="${j}"`;                                   // drag-and-drop target: list "c<i>" (clues of category i), position j
+const HD = `<span class="dh" draggable="true" title="Drag to reorder">⠿</span>`;
+const folded = new WeakSet();                                                            // collapsed categories/clues
+const objOf = k => { const [a, b] = k.slice(1).split("."); return b === undefined ? cur.categories[a] : cur.categories[a].clues[b]; };
+const TG = k => `<button class="bad tg" data-tg="${k}" title="Collapse / expand">${folded.has(objOf(k)) ? "▸" : "▾"}</button>`;
+const mediaInput = (d, v, i, j, k) => `<input class="grow" ${d} value="${esc(v || "")}" placeholder="Paste a link / upload →"><button class="bad" data-up="${[i, j, k].filter(x => x !== undefined).join("-")}">Upload</button>`;
+
+const kit = { D, TYPES, opts, X, DL, HD, TG, mediaInput, folded, esc };   // handed to each mode's editor hooks
+const optHtml = (o, v) => o.type === "checkbox"
+  ? `<label><input type="checkbox" data-opt="${o.key}"${v ? " checked" : ""}> ${o.label}</label>`
+  : `<label>${o.label} <input type="number" class="num" data-opt="${o.key}" min="${o.min ?? ""}" max="${o.max ?? ""}" value="${v}"></label>`;
+function category(c, i, m) {
+  const body = folded.has(c) ? "" : c.clues.map((q, j) => m.entry(q, i, j, kit)).join("") + `<button data-x="a${i}">+ Add ${m.entryLabel}</button>`;
+  return `<div class="card" data-dl="c" data-di="${i}"><div class="row">${HD}${TG("c" + i)}${m.head(c, i, kit)}${X("c" + i, "Remove")}</div>${body}</div>`;
+}
+function draw() {
+  $("ed").hidden = !cur; if (!cur) return;
+  const m = modeOf(cur);
+  $("bn").value = cur.name;
+  $("opts").innerHTML = m.options.map(o => optHtml(o, o.def(cur))).join("");
+  $("addcat").textContent = "+ Add " + m.catLabel;
+  $("cats").innerHTML = cur.categories.map((c, i) => category(c, i, m)).join("");
+}
+
+// ----- toolbar -----
+$("sel").onchange = () => { if (!leave()) { $("sel").value = id; return; } id = $("sel").value; cur = structuredClone(norm(lib[id])); dirty = false; draw(); };
+$("newbtns").innerHTML = Object.values(MODES).map(m => `<button data-mode="${m.id}">New ${m.label}</button>`).join("");
+$("newbtns").onclick = e => { const m = MODES[e.target.dataset.mode]; if (m && leave()) add(m.blank()); };
+$("dup").onclick = () => cur && add({ ...structuredClone(cur), name: cur.name + " (copy)" });
+$("del").onclick = () => { if (id && confirm(`Delete "${cur.name}"?`)) remove(LIB(`boards/${id}`)); };
+$("save").onclick = () => set(LIB(`boards/${id}`), cur).then(() => { dirty = false; $("msg").textContent = "Saved ✓"; }).catch(e => $("msg").textContent = "Save failed: " + e.code);
+$("out").onclick = () => signOut(auth);
+$("imp").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { const j = JSON.parse(await f.text()); if (!j.categories) throw 0; await add({ ...j, name: j.name || f.name.replace(/\.json$/, "") }); }
+  catch { alert("That isn't a valid board file."); }
+  e.target.value = "";
+};
+$("exp").onclick = () => {
+  if (!cur) return;
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(cur, null, 2)], { type: "application/json" }));
+  a.download = (cur.name || "board") + ".json"; a.click();
+};
+
+// ----- board options -----
+$("bn").oninput = e => { cur.name = e.target.value; touch(); };
+$("opts").addEventListener("input", e => {   // board-level settings declared by the mode (decay, all at once...)
+  const k = e.target.dataset.opt; if (!k) return;
+  cur[k] = e.target.type === "checkbox" ? e.target.checked : Number(e.target.value) || 0; touch();
+});
+$("addcat").onclick = () => { cur.categories.push(modeOf(cur).newCategory(cur.categories.length)); touch(); draw(); };
+$("cola").onclick = () => { cur.categories.forEach(c => c.clues.forEach(q => folded.add(q))); draw(); };
+$("expa").onclick = () => { cur.categories.forEach(c => { folded.delete(c); c.clues.forEach(q => folded.delete(q)); }); draw(); };
+
+// ----- editing fields: every input says which field it edits through its data-c / data-q / data-i / data-f -----
+$("cats").oninput = e => {
+  const d = e.target.dataset; if (!d.f) return;
+  const c = cur.categories[d.c], t = d.i !== undefined ? c.clues[d.q].items[d.i] : d.q === undefined ? c : c.clues[d.q];
+  t[d.f] = ["value", "points", "penalty"].includes(d.f) ? Number(e.target.value) || 0 : e.target.value;
+  touch(); if (d.f === "type") draw();
+};
+$("cats").onclick = e => {
+  const b = e.target.closest("button"), d = b?.dataset; if (!d) return;
+  if (d.tg) { const o = objOf(d.tg); folded.has(o) ? folded.delete(o) : folded.add(o); draw(); return; }
+  if (d.up) {
+    upK = d.up; const [i, j, k] = d.up.split("-").map(Number), cl = cur.categories[i].clues[j];
+    $("file").accept = (k === undefined ? cl : cl.items[k]).type === "audio" ? "audio/*" : "image/*"; $("file").click(); return;
+  }
+  const x = d.x; if (!x) return;
+  const n = x.slice(1).split("-").map(Number), cats = cur.categories;
+  if (x[0] === "c") cats.splice(n[0], 1);
+  if (x[0] === "q") cats[n[0]].clues.splice(n[1], 1);
+  if (x[0] === "a") cats[n[0]].clues.push(modeOf(cur).newEntry(cats[n[0]]));
+  else if (!["c", "q"].includes(x[0])) modeOf(cur).action?.(cur, x[0], n);   // anything else is a button the mode added
+  touch(); draw();
+};
+$("file").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f || !upK) return;
+  const [i, j, k] = upK.split("-").map(Number), cl = cur.categories[i].clues[j], it = k === undefined ? cl : cl.items[k], fld = k === undefined ? "media" : "v";
+  try {
+    const data = it.type === "image" ? await shrink(f) : await readAudio(f), m = push(LIB("media"));
+    await set(m, { data, name: f.name }); it[fld] = "db:" + m.key; draw(); touch(); $("msg").textContent = "Uploaded. Press Save.";
+  } catch (err) { alert(err.message || "Upload failed."); }
+};
+
+// ----- drag to reorder (categories, and clues inside a category) -----
+let drag = null;
+const listOf = k => k === "c" ? cur.categories : cur.categories[Number(k.slice(1))].clues;
+$("cats").addEventListener("dragstart", e => {
+  const h = e.target.closest?.(".dh"); if (!h) return;
+  const row = h.closest("[data-dl]"); drag = { l: row.dataset.dl, i: Number(row.dataset.di) };
+  e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", "x"); e.dataTransfer.setDragImage(row, 20, 20); row.classList.add("dragging");
+});
+$("cats").addEventListener("dragover", e => {
+  if (!drag) return; const row = e.target.closest?.(`[data-dl="${drag.l}"]`); if (!row) return;
+  e.preventDefault(); $("cats").querySelectorAll(".over").forEach(x => x.classList.remove("over")); row.classList.add("over");
+});
+$("cats").addEventListener("drop", e => {
+  if (!drag) return; const row = e.target.closest?.(`[data-dl="${drag.l}"]`); if (!row) return;
+  e.preventDefault(); const a = listOf(drag.l), [m] = a.splice(drag.i, 1); a.splice(Number(row.dataset.di), 0, m); drag = null; touch(); draw();
+});
+$("cats").addEventListener("dragend", () => { drag = null; $("cats").querySelectorAll(".dragging,.over").forEach(x => x.classList.remove("dragging", "over")); });
+</script></body></html>

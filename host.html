@@ -1,0 +1,235 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Game Show · Host</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap"><link rel="stylesheet" href="style.css"></head><body>
+<main class="wrap">
+<h1>Game Show · Host Panel</h1>
+<section id="login" class="card center narrow" hidden></section>
+<div id="app" hidden>
+<section class="grid">
+ <div class="card center"><h2>Players scan to join</h2><div id="qr"></div><p id="link" class="small"></p><p class="small"><a id="disp" target="_blank">Open the big-screen display ↗</a></p><p class="small">Room: <b id="rm"></b> <button id="chg" class="bad tiny">Change room</button></p></div>
+ <div class="card"><h2>Current clue</h2>
+  <div id="clue" class="clue"></div><div id="pv" class="items"></div>
+  <div id="ans" class="small"></div>
+  <div id="status" class="status">Locked</div>
+  <div class="row"><button id="open">Open buzzers</button><button id="right" class="good">Correct +</button><button id="wrong" class="bad">Wrong −</button><button id="next">Next clue ▸</button><button id="replay" class="bad">🔊 Replay</button><button id="skip">Skip</button><button id="cancel" class="bad">Cancel</button></div>
+  <div class="opts">
+   <label>Reward (correct) <input id="val" class="num" type="number" value="200" step="50"></label>
+   <label>Penalty (wrong) <input id="pen" class="num" type="number" value="200" step="50"></label>
+   <label><input id="auto" type="checkbox"> Open buzzers automatically when a clue is picked</label>
+   <label><input id="tm" type="checkbox"> Answer timer after a buzz</label>
+   <label>Seconds <input id="tmv" class="num" type="number" min="1" max="300"></label>
+  </div>
+ </div>
+</section>
+<section class="card"><h2>Players &amp; Teams</h2>
+<div class="pt">
+<div><h3>Teams</h3>
+ <label class="small"><input id="teamson" type="checkbox"> Enable teams (players pick a team when they join)</label>
+ <div id="teamlist"></div>
+ <div class="row"><input id="tname" placeholder="Team name"><button id="tadd">Add team</button></div>
+</div>
+<div><h3>Players</h3>
+ <div id="reqs"></div>
+ <div class="row"><input id="name" placeholder="Player name"><select id="pteam" hidden></select><button id="add">Add player</button><button id="reset" class="bad">New game</button></div>
+ <div id="players"></div>
+</div>
+</div></section>
+<section class="card"><h2>Board</h2><div class="row"><select id="boards"></select><button id="load">Load board</button><a href="editor.html">Edit boards</a></div><div id="board" class="board"></div></section>
+</div>
+</main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<script type="module">
+import { get, set, push, remove, onValue, runTransaction, R, LIB, $, room, cleanRoom, esc, norm, arr, worth, penaltyOf, answerOf, modeOf, publicBoard, parseKey, byNum, nextNum, setHtml, paintBoard, audioHtml, bindAudio, dot, TEAM_COLORS, BUZZ_DELAY, hostLogin } from "./common.js";
+const watch = (path, fn) => onValue(R(path), s => fn(s.val()));
+
+// ----- live data -----
+let players = {}, buzz = {}, clue = null, used = {}, board = { categories: [] }, lib = {}, boardId = null, teams = {}, teamsOn = false, reqs = {}, showAns = false;
+const tdot = p => teamsOn ? dot(teams, p) : "";
+const num = id => Number($(id).value) || 0;
+
+// ----- remembered settings -----
+function remember(el, key, def) {
+  const v = localStorage.getItem(key), box = el.type === "checkbox";
+  if (box) el.checked = v === null ? def : v === "1"; else el.value = v || def;
+  el.addEventListener("change", () => localStorage.setItem(key, box ? (el.checked ? "1" : "0") : el.value));
+}
+remember($("auto"), "auto", true); remember($("tm"), "tm", false); remember($("tmv"), "tmv", 10);
+
+// ----- join QR + links -----
+const joinUrl = new URL("play.html?room=" + room, location.href).href;
+try { const q = qrcode(0, "M"); q.addData(joinUrl); q.make(); $("qr").innerHTML = q.createImgTag(6, 0); }
+catch (e) { $("qr").textContent = "QR failed: " + e.message; }
+$("link").textContent = joinUrl;
+$("disp").href = new URL("index.html?room=" + room, location.href).href;
+$("rm").textContent = room;
+$("chg").onclick = () => {
+  const n = prompt("Room code (letters and numbers). Leave blank for a new random room:", room); if (n === null) return;
+  location.href = "host.html?room=" + (cleanRoom(n) || Math.random().toString(36).slice(2, 7));
+};
+// every host window follows the same room, so windows can't drift into separate games
+async function syncRoom() {
+  const saved = (await get(LIB("room"))).val();
+  if (!new URLSearchParams(location.search).has("room") && saved && saved !== room) location.replace("host.html?room=" + saved);
+  else set(LIB("room"), room);
+}
+
+// ----- boards -----
+const useBoard = () => { board = lib[boardId] ? norm(lib[boardId]) : { categories: [] }; render(); };
+const fillBoards = () => setHtml($("boards"), Object.entries(lib).map(([k, b]) => `<option value="${k}" ${k === boardId ? "selected" : ""}>${esc(b.name || "Untitled")}${modeOf(b).tag}</option>`).join(""));
+const pubBoard = b => set(R("board"), publicBoard(b));
+watch("boardId", v => { boardId = v; fillBoards(); useBoard(); });
+hostLogin(() => {
+  syncRoom();
+  onValue(LIB("boards"), s => { lib = s.val() || {}; fillBoards(); useBoard(); if (boardId && lib[boardId]) pubBoard(norm(lib[boardId])); });   // edits in the editor reach the display
+});
+$("load").onclick = async () => {
+  const id = $("boards").value; if (!id) return;
+  if (Object.keys(used).length && !confirm("Loading a board resets the tiles. Continue?")) return;
+  await pubBoard(norm(lib[id]));
+  set(R("boardId"), id); set(R("start"), Date.now()); set(R("used"), null); set(R("clue"), null); set(R("buzz"), { open: false });
+};
+
+// ----- players, buzz, clue, used -----
+watch("players", v => { players = v || {}; render(); });
+watch("buzz", v => { buzz = v || {}; render(); watchTimer(); });
+watch("used", v => { used = v || {}; render(); });
+let lastWk = "";
+watch("clue", v => {
+  if (clue?.key !== v?.key) showAns = false;
+  clue = v;
+  const wk = clue ? clue.key + "|" + (clue.shown ?? 0) : "";
+  if (wk !== lastWk) { lastWk = wk; if (clue) { $("val").value = worth(clue, board); $("pen").value = penaltyOf(clue, board); } }   // reward/penalty boxes follow the clue
+  render();
+});
+
+// ----- answer timer: runs here, so this panel must stay open -----
+let tmId = null, tmT = null, tmClr = null;
+function watchTimer() {
+  if (buzz.winner && !tmId && $("tm").checked) {
+    const id = tmId = buzz.winner, secs = Math.max(1, num("tmv") || 10);
+    clearTimeout(tmClr);
+    set(R("timer"), { id, secs, tok: Date.now() });
+    tmT = setTimeout(() => {
+      if (buzz.winner !== id) return;
+      tmId = tmT = null;
+      set(R("timer"), { id, secs, tok: Date.now(), over: true });
+      penalize(id, true);                                   // timing out counts as a wrong answer
+      tmClr = setTimeout(() => set(R("timer"), null), 6000);
+    }, secs * 1000);
+  }
+  if (!buzz.winner && tmId) { clearTimeout(tmT); tmId = null; set(R("timer"), null); }
+}
+
+// ----- teams -----
+const fillTeams = () => {
+  $("teamson").checked = teamsOn;
+  setHtml($("teamlist"), Object.entries(teams).map(([id, t]) => `<div class="p"><i class="dot big" data-r="col" data-id="${id}" style="background:${esc(t.color)};cursor:pointer" title="Click to change the color"></i><input class="grow" data-r="tn" data-id="${id}" value="${esc(t.name)}"><button class="bad" data-r="td" data-id="${id}">✕</button></div>`).join(""));
+  $("pteam").hidden = !teamsOn;
+  setHtml($("pteam"), '<option value="">No team</option>' + Object.entries(teams).map(([id, t]) => `<option value="${id}">${esc(t.name)}</option>`).join(""));
+  render();
+};
+watch("teams", v => { teams = v || {}; fillTeams(); });
+watch("teamsOn", v => { teamsOn = !!v; fillTeams(); });
+$("teamson").onchange = () => set(R("teamsOn"), $("teamson").checked);
+$("tadd").onclick = () => { const name = $("tname").value.trim(); if (!name) return; push(R("teams"), { name, color: TEAM_COLORS[Object.keys(teams).length % TEAM_COLORS.length] }); $("tname").value = ""; };
+$("teamlist").onclick = e => {
+  const { r, id } = e.target.dataset; if (!r || !teams[id]) return;
+  if (r === "col") set(R(`teams/${id}/color`), TEAM_COLORS[(TEAM_COLORS.indexOf(teams[id].color) + 1) % TEAM_COLORS.length]);
+  if (r === "td" && confirm(`Remove team "${teams[id].name}"?`)) remove(R("teams/" + id));
+};
+$("teamlist").onchange = e => { const { r, id } = e.target.dataset; if (r === "tn" && e.target.value.trim()) set(R(`teams/${id}/name`), e.target.value.trim()); };
+
+// ----- join requests from phones -----
+watch("requests", v => {
+  reqs = v || {};
+  setHtml($("reqs"), Object.entries(reqs).filter(([, q]) => !q.status).map(([id, q]) =>
+    `<div class="p"><span class="n">${tdot({ team: q.team })}${esc(q.name)} wants to join</span><button class="good" data-r="ok" data-id="${id}">Approve</button><button class="bad" data-r="no" data-id="${id}">Deny</button></div>`).join(""));
+});
+$("reqs").onclick = e => {
+  const { r, id } = e.target.dataset, q = reqs[id]; if (!r || !q) return;
+  if (r === "ok") {
+    const p = push(R("players"), { name: q.name, num: nextNum(players), score: 0, team: q.team || null });
+    set(R("requests/" + id), { ...q, status: "approved", pid: p.key });
+  } else set(R("requests/" + id), { ...q, status: "denied" });
+};
+
+// ----- rendering -----
+function render() { renderStatus(); renderClue(); renderBoard(); renderPlayers(); }
+function renderStatus() {
+  const w = buzz.winner && players[buzz.winner];
+  $("status").innerHTML = w ? `${tdot(w)}${esc(w.name)} buzzed first!` : buzz.open ? "Buzzers open…" : "Locked";
+}
+function renderClue() {
+  const m = modeOf(board), items = arr(clue?.items);
+  $("clue").textContent = clue ? m.hostText(clue, board) : "Pick a tile on the board";
+  $("next").hidden = !(clue && m.reveal && m.canReveal(clue));
+  $("replay").hidden = !(clue && (m.reveal || items.some(i => i.type === "audio")));
+  setHtml($("pv"), items.map(i => i.v.startsWith("db:") ? `<div class="small">📎 uploaded ${i.type}</div>` : i.type === "image" ? `<img src="${esc(i.v)}" referrerpolicy="no-referrer" style="max-height:90px;border-radius:10px" alt="image failed to load">` : i.type === "audio" ? audioHtml(i.v, true) : "").join(""));
+  $("ans").textContent = clue ? (showAns ? "Answer: " + (answerOf(board, clue) || "?") : "👁 Tap to show answer") : "";
+}
+const renderBoard = () => paintBoard($("board"), board, used, true, !!clue);
+function renderPlayers() {
+  setHtml($("players"), Object.entries(players).sort(byNum).map(([id, p]) =>
+    `<div class="p${id === buzz.winner ? " hot" : ""}"><b>#${p.num}</b><span class="n">${tdot(p)}${esc(p.name)}</span><span class="s">${p.score}</span><button data-a="-" data-id="${id}">−</button><button data-a="+" data-id="${id}">+</button><button data-a="x" data-id="${id}" class="bad">✕</button></div>`).join(""));
+}
+
+// ----- scoring -----
+const adjust = (id, d) => runTransaction(R(`players/${id}/score`), v => (v || 0) + d);
+// the CORRECT/WRONG screen on the big screen is driven by this record: old and new scores for everyone
+const result = (id, ok, d, late) => {
+  const p = players[id], from = p?.score || 0;
+  set(R("result"), { t: Date.now(), late: !!late, ok, name: p?.name || "", id, from, to: from + d,
+    rows: Object.entries(players).map(([pid, q]) => ({ id: pid, num: q.num, name: q.name, from: q.score, to: q.score + (pid === id ? d : 0) })) });
+};
+const penalize = (id, late) => {
+  const d = num("pen"); result(id, false, -d, late); adjust(id, -d);
+  set(R("buzz"), { open: true, out: { ...(buzz.out || {}), [id]: true } });   // buzzers reopen for everyone else
+};
+const done = mark => { if (clue && mark) set(R("used/" + clue.key), true); set(R("clue"), null); set(R("media"), null); set(R("buzz"), { open: false }); };
+
+$("right").onclick = () => { const id = buzz.winner; if (!id) return; const d = num("val"); result(id, true, d); adjust(id, d); done(true); };
+$("wrong").onclick = () => { if (buzz.winner) penalize(buzz.winner); };
+$("open").onclick = () => set(R("buzz"), { open: true });
+$("skip").onclick = () => done(true);
+$("cancel").onclick = () => done(false);
+$("replay").onclick = () => clue && set(R("clue/play"), Date.now());
+$("ans").onclick = () => { showAns = !showAns; renderClue(); };
+
+// ----- picking a tile -----
+// copy the uploaded media a clue needs from the host-only library into the room (the display can't read the library)
+const pub = its => Promise.all(its.filter(i => i.type !== "text" && i.v?.startsWith("db:")).map(async i => {
+  const k = i.v.slice(3), d = (await get(LIB(`media/${k}`))).val()?.data;
+  if (d) await set(R("media/" + k), d);
+}));
+$("board").onclick = async e => {
+  const k = e.target.closest("[data-k]")?.dataset.k; if (!k || clue) return;
+  const next = modeOf(board).pick(board, k);                  // the mode decides what the clue looks like
+  set(R("buzz"), { open: false });
+  if ($("auto").checked) setTimeout(() => { if (clue?.key === k && !buzz.winner) set(R("buzz"), { open: true }); }, BUZZ_DELAY);   // opens when the 3-2-1 ends
+  await pub(arr(next.items));
+  set(R("clue"), next);
+};
+$("next").onclick = async () => {   // modes with hints: reveal one more clue (the mode lowers the reward)
+  const nx = clue && modeOf(board).reveal?.(clue, board); if (!nx) return;
+  await pub(arr(nx.items).slice(arr(clue.items).length));
+  set(R("clue"), nx);
+};
+
+// ----- manual player management -----
+$("add").onclick = () => {
+  const name = $("name").value.trim(); if (!name) return;
+  push(R("players"), { name, num: nextNum(players), score: 0, team: teamsOn ? ($("pteam").value || null) : null }); $("name").value = "";
+};
+$("name").onkeydown = e => { if (e.key === "Enter") $("add").click(); };
+$("players").onclick = e => {
+  const { a, id } = e.target.dataset; if (!a) return;
+  if (a === "x") { if (confirm(`Remove ${players[id].name}?`)) remove(R("players/" + id)); }
+  else adjust(id, a === "+" ? num("val") : -num("val"));
+};
+$("reset").onclick = () => {
+  if (!confirm("Reset all scores and the board?")) return;
+  set(R("used"), null); set(R("clue"), null); set(R("buzz"), { open: false }); set(R("start"), Date.now());
+  Object.keys(players).forEach(id => set(R(`players/${id}/score`), 0));
+};
+bindAudio($("pv"));
+</script></body></html>

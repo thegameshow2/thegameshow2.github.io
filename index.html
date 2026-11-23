@@ -1,0 +1,228 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Game Show</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap"><link rel="stylesheet" href="style.css"></head><body>
+<div class="stage">
+ <main class="main">
+  <h1>Game Show</h1>
+  <div id="board" class="board"></div>
+  <div id="overlay" class="overlay" hidden><div id="oc" class="cl"></div><div id="cd" class="cd"></div><div id="oq" class="q"></div><div id="oi" class="items"></div><div id="os" class="status"></div><div id="tn" class="tn" hidden></div></div>
+  <div id="flash" class="flash"></div>
+  <div id="champ" class="champ"></div>
+  <div id="to" class="to"><b>TIME OUT</b><small>Buzzer is open for other players</small></div>
+  <div id="lb" class="lb"></div>
+  <div class="small roomtag">Room: <span id="rmv"></span></div>
+ </main>
+ <button id="snd" class="bad corner">🔊 Click once to enable sound</button>
+ <button id="mute" class="bad corner" hidden>🔊</button>
+ <aside class="side card"><h2>Scores</h2><div id="sb"></div></aside>
+</div>
+<script type="module">
+import { onValue, R, $, room, esc, norm, arr, modeOf, tileKeys, byScore, sleep, setHtml, paintBoard, audioHtml, bindAudio, dot, COUNT_STEP } from "./common.js";
+import { SFX, ctx, sfx } from "./sound.js";
+
+// ===== TIMINGS (milliseconds): edit these numbers to tune the animations =====
+const TIME = {
+  countStep: COUNT_STEP, // each number of the 3-2-1 countdown (change it in common.js: the host's buzzer delay follows it)
+  overlay: 500,       // clue panel fading in / out
+  popIn: 550,         // CORRECT/WRONG and leaderboard screens popping in
+  fade: 700,          // fade-out and the crossfade between screens
+  resultHold0: 1100,  // CORRECT/WRONG sits still before the score starts counting
+  scoreCount: 1800,   // score counting up/down on the result screen
+  pulses: 5,          // number of size pulses while the score counts
+  resultHold1: 2000,  // pause after the score finishes, before the leaderboard
+  lbShow: 1500,       // leaderboard visible before the names start moving
+  lbMove: 1000,       // names sliding to their new positions
+  lbHold: 5000,       // leaderboard stays after moving, then fades out
+  timeoutShow: 3500,  // how long the TIME OUT screen stays up
+};
+for (const [k, v] of Object.entries({ ov: TIME.overlay, pop: TIME.popIn, fade: TIME.fade, count: TIME.countStep, move: TIME.lbMove })) document.documentElement.style.setProperty("--t-" + k, v + "ms");
+// ==============================================================================
+
+// ----- live data -----
+let players = {}, buzz = {}, clue = null, used = {}, board = { categories: [] }, media = {}, teams = {}, teamsOn = false;
+const watch = (path, fn) => onValue(R(path), s => fn(s.val()));
+const tdot = p => teamsOn ? dot(teams, p) : "";
+let lastW = null, lastOpen = false, firstStart = true;
+
+watch("board", v => { board = v ? norm(v) : { categories: [] }; render(); });
+watch("players", v => { players = v || {}; render(); });
+watch("clue", v => { clue = v; render(); });
+watch("media", v => { media = v || {}; render(); });
+watch("teams", v => { teams = v || {}; render(); });
+watch("teamsOn", v => { teamsOn = !!v; render(); });
+watch("buzz", v => {
+  buzz = v || {};
+  const wid = buzz.winner || null;
+  if (wid && wid !== lastW) sfx("buzz");
+  lastW = wid;
+  if (buzz.open && !lastOpen) sfx("open");
+  lastOpen = !!buzz.open;
+  render();
+});
+watch("used", v => { used = v || {}; render(); if (!allDone()) { if (winOn) hideWinner(); } else setTimeout(maybeWinner, 1500); });
+watch("start", () => { if (firstStart) { firstStart = false; return; } sfx("start"); hideWinner(); });   // host pressed Load board / New game
+$("rmv").textContent = room;
+
+// ----- answer timer (started by the host after a buzz) -----
+let tmLive = 0, firstTimer = true, toT = 0;
+function hideTimer() { $("tn").hidden = true; $("tn").className = "tn"; }
+function runTimer(secs, tok) {
+  const el = $("tn"); let n = secs; el.hidden = false; scheduleFit();
+  const step = () => {
+    if (tok !== tmLive || n === 0) return;
+    sfx("timer", n); el.textContent = n; el.className = "tn"; void el.offsetWidth; el.className = "tn go" + (n <= 3 ? " low" : "");
+    n--; setTimeout(step, 1000);
+  };
+  step();
+}
+function showTimeout() {
+  hideTimer(); sfx("timeout");
+  const o = $("to"); clearTimeout(toT); o.className = "to show";
+  toT = setTimeout(() => { o.className = "to out"; toT = setTimeout(() => { o.className = "to"; }, TIME.fade); }, TIME.timeoutShow);
+}
+watch("timer", v => {
+  const tok = ++tmLive, first = firstTimer; firstTimer = false;
+  if (!v) return hideTimer();
+  if (v.over) { if (!first) showTimeout(); return; }
+  runTimer(v.secs, tok);
+});
+
+// ----- CORRECT / WRONG, then the leaderboard -----
+let firstRes = true, lastRes = null, resTok = 0, resBusy = false;
+watch("result", r => {
+  if (firstRes) { firstRes = false; lastRes = r?.t; return; }   // ignore whatever result was already there on page load
+  if (!r || r.t === lastRes) return;
+  lastRes = r.t;
+  setTimeout(() => runResult(r), r.late ? TIME.timeoutShow + TIME.fade : 0);   // a timeout result waits for the TIME OUT screen
+});
+const countTo = (el, from, to, dur, pulse) => new Promise(res => {
+  const t0 = performance.now(); let lt = 0;
+  const tick = now => {
+    const p = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - p, 3);
+    if (pulse && from !== to && p < 1 && now - lt > 75) { lt = now; sfx("tick", to >= from, p); }
+    el.textContent = Math.round(from + (to - from) * e);
+    if (pulse) el.style.transform = `scale(${1 + 0.22 * Math.abs(Math.sin(p * Math.PI * TIME.pulses))})`;
+    if (p < 1) requestAnimationFrame(tick); else { el.style.transform = ""; res(); }
+  };
+  requestAnimationFrame(tick);
+});
+async function runResult(r) {
+  resBusy = true;
+  const tok = ++resTok, live = () => tok === resTok, f = $("flash"), lb = $("lb"), c = r.ok ? "ok" : "no";
+  lb.className = "lb"; f.className = "flash"; void f.offsetWidth;
+  f.innerHTML = `<b>${r.ok ? "CORRECT!" : "WRONG!"}</b><div class="who"><span class="nm">${tdot(players[r.id])}${esc(r.name)}</span><span class="sc ${c}">${r.from}</span></div>`;
+  f.className = "flash show " + c; sfx(r.ok ? "correct" : "wrong");
+  await sleep(TIME.resultHold0); if (!live()) return;
+  await countTo(f.querySelector(".sc"), r.from, r.to, TIME.scoreCount, true); if (!live()) return;
+  await sleep(TIME.resultHold1); if (!live()) return;
+
+  // leaderboard: teams on top (when enabled), then players. Each list is ranked by the old and by the new scores.
+  const rows = arr(r.rows), sum = (a, k) => a.reduce((t, x) => t + x[k], 0);
+  const tm = teamsOn ? Object.entries(teams).map(([id, t], i) => { const m = rows.filter(x => players[x.id]?.team === id); return { id: "t" + id, num: i, name: t.name, from: sum(m, "from"), to: sum(m, "to"), dot: `<i class="dot" style="background:${esc(t.color)}"></i>`, team: id }; }) : [];
+  const pl = rows.map(x => ({ ...x, dot: tdot(players[x.id]) }));
+  const lists = tm.length ? [tm, pl] : [pl], total = lists.reduce((t, l) => t + l.length, 0);
+  const ranks = lists.map(l => ["from", "to"].map(k => [...l].sort((a, b) => b[k] - a[k] || a.num - b.num).map(x => x.id)));
+  lb.innerHTML = `<h2>Leaderboard</h2>` + lists.map((l, li) => (tm.length ? `<div class="lbh">${li ? "Players" : "Teams"}</div>` : "") + `<div class="lbl" style="--n:${total};--c:${l.length}">` + l.map(x =>
+    `<div class="lbr" data-id="${x.id}" style="transform:translateY(calc(var(--rh) * ${ranks[li][0].indexOf(x.id)}))"><span class="rk">${ranks[li][0].indexOf(x.id) + 1}</span><span class="nm">${x.dot}${esc(x.name)}</span><span class="sc">${x.to}</span><span class="ar"></span></div>`).join("") + `</div>`).join("");
+  lb.className = "lb show"; f.className = "flash out " + c; sfx("swoosh");   // crossfade: leaderboard in while the result fades out
+  await sleep(TIME.fade); if (!live()) return;
+  f.className = "flash";
+  await sleep(Math.max(0, TIME.lbShow - TIME.fade)); if (!live()) return;
+  sfx("whoosh");
+  const mine = players[r.id]?.team;
+  lists.forEach((l, li) => l.forEach(x => {
+    const el = lb.querySelector(`[data-id="${x.id}"]`), a = ranks[li][0].indexOf(x.id), b = ranks[li][1].indexOf(x.id);
+    el.style.transform = `translateY(calc(var(--rh) * ${b}))`;
+    el.querySelector(".rk").textContent = b + 1;
+    if (x.id === r.id || (x.team && x.team === mine)) el.classList.add(c);
+    if (a !== b) el.querySelector(".ar").innerHTML = `<span class="${b < a ? "up" : "dn"}">${b < a ? "▲" : "▼"} ${Math.abs(a - b)}</span>`;
+  }));
+  await sleep(TIME.lbHold); if (!live()) return;
+  lb.className = "lb out"; await sleep(TIME.fade); if (!live()) return;
+  lb.className = "lb";
+  resBusy = false; maybeWinner();
+}
+
+// ----- winner screen (when every tile has been used) -----
+let winOn = false;
+const allDone = () => { const keys = tileKeys(board); return keys.length > 0 && keys.every(k => used[k]); };
+function hideWinner() { winOn = false; $("champ").className = "champ"; }
+function maybeWinner() {
+  if (winOn || resBusy || clue || !allDone()) return;
+  const rows = Object.entries(players).map(([id, p]) => ({ ...p, id }));
+  if (!rows.length) return;
+  const useTeams = teamsOn && Object.keys(teams).length;
+  const list = useTeams
+    ? Object.entries(teams).map(([id, t]) => ({ name: t.name, dot: `<i class="dot" style="background:${esc(t.color)}"></i>`, score: rows.filter(p => p.team === id).reduce((a, p) => a + p.score, 0) }))
+    : rows.map(p => ({ name: p.name, dot: tdot(p), score: p.score }));
+  const top = Math.max(...list.map(x => x.score)), won = list.filter(x => x.score === top), best = [...rows].sort((a, b) => b.score - a.score)[0];
+  const conf = Array.from({ length: 60 }, () => `<i class="cf" style="left:${(Math.random() * 100).toFixed(1)}%;background:hsl(${Math.floor(Math.random() * 360)},90%,60%);animation-delay:${(Math.random() * 2).toFixed(2)}s;animation-duration:${(2.5 + Math.random() * 2).toFixed(2)}s"></i>`).join("");
+  $("champ").innerHTML = conf + `<small>${won.length > 1 ? "IT'S A TIE" : useTeams ? "WINNING TEAM" : "WINNER"}</small><b>${won.map(x => x.dot + esc(x.name)).join(" &amp; ")}</b><span class="ws">${top} pts</span>` + (useTeams ? `<em>Top player: ${tdot(best)}${esc(best.name)} · ${best.score} pts</em>` : "");
+  winOn = true; $("champ").className = "champ show"; sfx("win");
+}
+
+// ----- the clue panel -----
+let counting = false, cdKey = null, cdTok = 0, ovT = 0, sig = "", lastPlay = 0, fitRaf = 0;
+function runCount() {
+  const tok = ++cdTok, el = $("cd"); let n = 3;
+  const step = () => {
+    if (tok !== cdTok || !clue) return;
+    if (n === 0) { counting = false; sfx("reveal"); render(); return; }
+    sfx("count"); el.textContent = n; el.className = "cd"; void el.offsetWidth; el.className = "cd go";
+    n--; setTimeout(step, TIME.countStep);
+  };
+  step();
+}
+// shrinks the clue text/images step by step until everything fits on the screen
+function fit() {
+  const ov = $("overlay"); if (ov.hidden || counting) return;
+  let k = 1; ov.style.setProperty("--fs", k);
+  while (k > 0.25 && (ov.scrollHeight > ov.clientHeight + 1 || ov.scrollWidth > ov.clientWidth + 1)) { k = Math.round((k - 0.05) * 100) / 100; ov.style.setProperty("--fs", k); }
+}
+const scheduleFit = () => { fitRaf ||= requestAnimationFrame(() => { fitRaf = 0; fit(); }); };   // many renders in a row -> one fit, before the next paint
+const auds = () => [...$("oi").querySelectorAll("audio")];
+const play = () => { const a = auds(); a.forEach(x => x.pause()); (clue?.all ? a[0] : a[a.length - 1])?.play().catch(() => {}); };
+function items() {
+  const src = i => i.v.startsWith("db:") ? (media[i.v.slice(3)] || "") : i.v, its = arr(clue.items), s = clue.key + "|" + its.length + "|" + Object.keys(media).length;
+  if (s !== sig) {
+    if (sig) sfx("reveal");
+    sig = s;
+    $("oi").innerHTML = its.map(i => i.type === "image" ? `<img src="${esc(src(i))}" referrerpolicy="no-referrer" alt="" onerror="this.outerHTML='<div class=item>⚠ Image failed to load</div>'">` : i.type === "audio" ? audioHtml(src(i)) : `<div class="item">${esc(i.v)}</div>`).join("");
+    if (clue.all ? auds().length : its[its.length - 1]?.type === "audio") play();
+  }
+  if (clue.play && clue.play !== lastPlay) { lastPlay = clue.play; play(); }   // host pressed Replay
+}
+function renderClue() {
+  const ov = $("overlay");
+  if (clue) { clearTimeout(ovT); ov.classList.remove("out"); ov.hidden = false; }
+  else if (!ov.hidden && !ov.classList.contains("out")) { ov.classList.add("out"); ovT = setTimeout(() => { ov.hidden = true; ov.classList.remove("out"); }, TIME.overlay); }
+  if (!clue) { $("oi").innerHTML = ""; sig = ""; counting = false; cdKey = null; cdTok++; ov.classList.remove("counting"); return; }
+
+  const w = buzz.winner && players[buzz.winner];
+  if (clue.key !== cdKey) { cdKey = clue.key; counting = true; runCount(); }
+  const { h1, h2 } = modeOf(board).header(clue, board, counting);   // the mode writes the two title lines
+  setHtml($("oc"), `<div class="h1">${h1}</div><div class="h2">${h2}</div>`);
+  $("oq").textContent = clue.question || "";
+  $("os").className = w ? "status big" : "status";
+  setHtml($("os"), w ? tdot(w) + esc(w.name) : buzz.open ? "Buzzers open!" : "Get ready…");
+  ov.classList.toggle("counting", counting);
+  if (arr(clue.items).length) { if (!counting) items(); } else { $("oi").innerHTML = ""; sig = ""; }
+  scheduleFit();
+}
+
+// ----- scoreboard + render -----
+function renderScores() {
+  const list = Object.entries(players).sort(byScore);
+  setHtml($("sb"), list.length
+    ? list.map(([id, p], i) => `<div class="sb${id === buzz.winner ? " hot" : ""}${buzz.out?.[id] ? " out" : ""}"><b>${i + 1}</b><span class="n">${tdot(p)}${esc(p.name)}</span><span class="s">${p.score}</span></div>`).join("")
+    : '<p class="small">Waiting for players…<br>Open this page from the host panel link.</p>');
+}
+function render() { paintBoard($("board"), board, used); renderClue(); renderScores(); }
+
+// ----- sound buttons -----
+$("snd").onclick = () => { ctx().resume(); $("snd").hidden = true; $("mute").hidden = false; $("mute").textContent = SFX.on ? "🔊" : "🔇"; sfx("open"); };
+$("mute").onclick = () => { SFX.on = !SFX.on; localStorage.setItem("sfx", SFX.on ? "1" : "0"); $("mute").textContent = SFX.on ? "🔊" : "🔇"; if (SFX.on) sfx("open"); };
+addEventListener("resize", scheduleFit);
+$("oi").addEventListener("load", scheduleFit, true);   // images finishing loading change the size
+bindAudio($("oi"));
+</script></body></html>

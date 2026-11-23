@@ -1,0 +1,90 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>Buzzer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800&display=swap"><link rel="stylesheet" href="style.css"></head><body>
+<main class="wrap center">
+ <h1>Buzzer</h1>
+ <p id="rmv" class="small"></p>
+ <div id="join" class="card" hidden>
+  <h2 id="jt">Enter your name</h2>
+  <div id="jf" class="row" style="justify-content:center"><input id="nm" maxlength="20" placeholder="Your name"><select id="tsel" hidden></select><button id="go">Join</button></div>
+  <p id="jm" class="status"></p>
+  <details class="small"><summary>Already on the list? Rejoin</summary><div id="pick" class="pick"></div></details>
+ </div>
+ <div id="game" hidden>
+  <p id="who" class="status"></p>
+  <p id="clue" class="clue"></p>
+  <button id="buzz" class="buzz">BUZZ</button>
+  <p id="msg" class="status"></p>
+  <button id="switch" class="bad">Not you?</button>
+ </div>
+</main>
+<script type="module">
+import { onValue, push, remove, runTransaction, R, $, room, esc, dot, byNum, setHtml } from "./common.js";
+$("rmv").textContent = "Room: " + room;
+const key = "pid-" + room, rkey = "req-" + room;   // localStorage: my player id / my pending join request
+let players = {}, buzz = {}, clue = null, teams = {}, teamsOn = false, note = "";
+const watch = (path, fn) => onValue(R(path), s => fn(s.val()));
+watch("players", v => { players = v || {}; render(); });
+watch("buzz", v => { buzz = v || {}; render(); });
+watch("clue", v => { clue = v; render(); });
+watch("teams", v => { teams = v || {}; fillTeams(); });
+watch("teamsOn", v => { teamsOn = !!v; fillTeams(); });
+
+function render() {
+  const me = localStorage.getItem(key), mine = players[me];
+  $("join").hidden = !!mine; $("game").hidden = !mine;
+  if (!mine) {
+    const pending = !!localStorage.getItem(rkey);
+    $("jf").hidden = pending; $("jt").textContent = pending ? "Request sent" : "Enter your name";
+    $("jm").textContent = pending ? "Waiting for the host to approve you…" : note;
+    setHtml($("pick"), Object.keys(players).length ? Object.entries(players).sort(byNum).map(([id, p]) => `<button data-id="${id}">${esc(p.name)}</button>`).join("") : "<p>No players yet.</p>");
+    return;
+  }
+  const out = buzz.out?.[me], can = buzz.open && !buzz.winner && !out;
+  $("who").innerHTML = `${teamsOn ? dot(teams, mine) : ""}${esc(mine.name)} · ${mine.score} pts`;
+  $("clue").textContent = clue ? "👀 Look at the big screen" : "";
+  $("buzz").disabled = !can;
+  $("msg").textContent = buzz.winner ? (buzz.winner === me ? "You buzzed first! 🎉" : `${players[buzz.winner]?.name || "Someone"} buzzed first`)
+    : out ? "You're locked out this question" : buzz.open ? "GO!" : "Wait for the host…";
+}
+function fillTeams() {
+  const keep = $("tsel").value;
+  $("tsel").hidden = !(teamsOn && Object.keys(teams).length);
+  setHtml($("tsel"), '<option value="">Choose your team</option>' + Object.entries(teams).map(([id, t]) => `<option value="${id}">${esc(t.name)}</option>`).join(""));
+  $("tsel").value = teams[keep] ? keep : "";
+  render();
+}
+
+// ----- join: send a request, wait for the host to approve it -----
+let unwatch = null;
+function watchRequest() {
+  const id = localStorage.getItem(rkey); if (!id) return;
+  unwatch?.();                                           // never listen to two requests at once
+  unwatch = onValue(R("requests/" + id), s => {
+    const v = s.val(), drop = () => { localStorage.removeItem(rkey); remove(R("requests/" + id)); };
+    if (v?.status === "approved") { localStorage.setItem(key, v.pid); drop(); }
+    else if (v?.status === "denied") { drop(); note = "The host declined that request. You can try again."; }
+    else if (!v) localStorage.removeItem(rkey);
+    render();
+  });
+}
+$("go").onclick = () => {
+  const name = $("nm").value.trim().slice(0, 20); if (!name) return;
+  if (!$("tsel").hidden && !$("tsel").value) { note = "Pick your team first."; render(); return; }
+  localStorage.setItem(rkey, push(R("requests"), { name, team: $("tsel").value || null, t: Date.now() }).key);
+  note = ""; watchRequest(); render();
+};
+$("nm").onkeydown = e => { if (e.key === "Enter") $("go").click(); };
+watchRequest();
+$("pick").onclick = e => { const id = e.target.dataset.id; if (id) { localStorage.setItem(key, id); render(); } };
+$("switch").onclick = () => { localStorage.removeItem(key); render(); };
+
+// ----- buzz: the first phone to win this transaction gets the question -----
+$("buzz").onclick = () => {
+  const me = localStorage.getItem(key);
+  navigator.vibrate?.(60);
+  runTransaction(R("buzz"), cur => {
+    if (cur?.open && !cur.winner && !cur.out?.[me]) { cur.winner = me; cur.open = false; return cur; }
+  });
+};
+</script></body></html>
