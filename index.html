@@ -177,7 +177,7 @@ function runCount() {
 function fit() {
   const ov = $("overlay"); if (ov.hidden || counting) return;
   let k = 1; ov.style.setProperty("--fs", k);
-  while (k > 0.25 && (ov.scrollHeight > ov.clientHeight + 1 || ov.scrollWidth > ov.clientWidth + 1)) { k = Math.round((k - 0.05) * 100) / 100; ov.style.setProperty("--fs", k); }
+  while (k > 0.25 && (ov.scrollHeight > ov.clientHeight + 1 || ov.scrollWidth > ov.clientWidth + 1)) { k = Math.round((k - 0.02) * 100) / 100; ov.style.setProperty("--fs", k); }
 }
 const scheduleFit = () => { fitRaf ||= requestAnimationFrame(() => { fitRaf = 0; fit(); }); };   // many renders in a row -> one fit, before the next paint
 const auds = () => [...$("oi").querySelectorAll("audio")];
@@ -206,6 +206,7 @@ function renderClue() {
   $("os").className = w ? "status big" : "status";
   setHtml($("os"), w ? tdot(w) + esc(w.name) : buzz.open ? "Buzzers open!" : "Get ready…");
   ov.classList.toggle("counting", counting);
+  ov.classList.toggle("has-img", arr(clue.items).some(i => i.type === "image"));
   if (arr(clue.items).length) { if (!counting) items(); } else { $("oi").innerHTML = ""; sig = ""; }
   scheduleFit();
 }

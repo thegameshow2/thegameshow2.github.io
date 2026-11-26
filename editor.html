@@ -42,10 +42,10 @@ async function add(b) {
   id = n.key; cur = structuredClone(norm(b)); dirty = false; fill();
 }
 
-// ----- uploads: images shrunk to 900px, audio up to 1.5 MB, stored as data URLs in library/media -----
+// ----- uploads: images shrunk to 1400px, audio up to 1.5 MB, stored as data URLs in library/media -----
 const shrink = f => new Promise((res, rej) => {
   const im = new Image();
-  im.onload = () => { const z = Math.min(1, 900 / Math.max(im.width, im.height)), cv = document.createElement("canvas"); cv.width = im.width * z; cv.height = im.height * z; cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height); res(cv.toDataURL("image/jpeg", .75)); };
+  im.onload = () => { const z = Math.min(1, 1400 / Math.max(im.width, im.height)), cv = document.createElement("canvas"); cv.width = im.width * z; cv.height = im.height * z; cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height); res(cv.toDataURL("image/jpeg", .75)); };
   im.onerror = () => rej(new Error("Couldn't read that image.")); im.src = URL.createObjectURL(f);
 });
 const readAudio = f => new Promise((res, rej) => {

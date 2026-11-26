@@ -13,20 +13,23 @@
  <div id="game" hidden>
   <p id="who" class="status"></p>
   <p id="clue" class="clue"></p>
+  <div id="pclue" class="pclue" hidden></div>
   <button id="buzz" class="buzz">BUZZ</button>
   <p id="msg" class="status"></p>
   <button id="switch" class="bad">Not you?</button>
  </div>
 </main>
 <script type="module">
-import { onValue, push, remove, runTransaction, R, $, room, esc, dot, byNum, setHtml } from "./common.js";
+import { onValue, arr, push, remove, runTransaction, R, $, room, esc, dot, byNum, setHtml } from "./common.js";
 $("rmv").textContent = "Room: " + room;
 const key = "pid-" + room, rkey = "req-" + room;   // localStorage: my player id / my pending join request
-let players = {}, buzz = {}, clue = null, teams = {}, teamsOn = false, note = "";
+let players = {}, buzz = {}, clue = null, teams = {}, teamsOn = false, note = "", media = {}, showClue = false;
 const watch = (path, fn) => onValue(R(path), s => fn(s.val()));
 watch("players", v => { players = v || {}; render(); });
 watch("buzz", v => { buzz = v || {}; render(); });
 watch("clue", v => { clue = v; render(); });
+watch("media", v => { media = v || {}; render(); });
+watch("showOnPhones", v => { showClue = !!v; render(); });
 watch("teams", v => { teams = v || {}; fillTeams(); });
 watch("teamsOn", v => { teamsOn = !!v; fillTeams(); });
 
@@ -42,11 +45,18 @@ function render() {
   }
   const out = buzz.out?.[me], can = buzz.open && !buzz.winner && !out;
   $("who").innerHTML = `${teamsOn ? dot(teams, mine) : ""}${esc(mine.name)} · ${mine.score} pts`;
-  $("clue").textContent = clue ? "👀 Look at the big screen" : "";
+  // the clue appears when the buzzers open (the same moment the big screen finishes its 3-2-1), and only if the host switched it on
+  const live = !!clue && showClue && (buzz.open || !!buzz.winner);
+  $("pclue").hidden = !live; if (live) setHtml($("pclue"), clueHtml(clue));
+  $("clue").textContent = clue && !live ? "👀 Look at the big screen" : "";
   $("buzz").disabled = !can;
   $("msg").textContent = buzz.winner ? (buzz.winner === me ? "You buzzed first! 🎉" : `${players[buzz.winner]?.name || "Someone"} buzzed first`)
     : out ? "You're locked out this question" : buzz.open ? "GO!" : "Wait for the host…";
 }
+// text and images only (audio plays on the big screen); answers are never in the clue the room receives
+const src = i => i.v.startsWith("db:") ? (media[i.v.slice(3)] || "") : i.v;
+const clueHtml = c => (c.question ? `<div class="pq">${esc(c.question)}</div>` : "")
+  + arr(c.items).map(i => i.type === "image" ? `<img src="${esc(src(i))}" referrerpolicy="no-referrer" alt="">` : i.type === "text" ? `<div class="item">${esc(i.v)}</div>` : "").join("");
 function fillTeams() {
   const keep = $("tsel").value;
   $("tsel").hidden = !(teamsOn && Object.keys(teams).length);

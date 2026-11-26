@@ -113,9 +113,15 @@ option { color: #000 }
 .overlay:not(.counting) .q, .overlay:not(.counting) .items, .overlay:not(.counting) .status { animation: rise var(--t-pop, .55s) ease-out both }
 .overlay.counting .q, .overlay.counting .items, .overlay.counting .status { display: none }
 .overlay:not(.counting) .cd { display: none }
+/* clues with an image: compact title and status lines so the picture gets the room (it can grow to 82% of the screen height) */
+.overlay.has-img { padding: 1.5vh 4vw; gap: clamp(6px, 1vh, 14px) }
+.overlay.has-img .cl .h1 { font-size: clamp(1.1rem, 1.8vw, 1.6rem) }
+.overlay.has-img .cl .h2 { font-size: clamp(.9rem, 1.5vw, 1.4rem); margin-top: .1em }
+.overlay.has-img .status { font-size: clamp(1.1rem, 2vw, 1.8rem) }
+.overlay.has-img .status.big { font-size: calc(clamp(1.6rem, 4vw, 3.4rem) * var(--fs, 1)) }
 .items { display: flex; flex-wrap: wrap; gap: clamp(24px, 4vw, 56px); justify-content: center; align-items: center; margin: 0 }
 .items > :last-child { animation: rise var(--t-pop, .55s) ease-out both }
-.items img { max-height: calc(55vh * var(--fs, 1)); max-width: min(100%, 900px); border-radius: 18px; box-shadow: 0 10px 40px #0008 }
+.items img { max-height: calc(84vh * var(--fs, 1)); max-width: min(100%, 1350px); border-radius: 18px; box-shadow: 0 10px 40px #0008 }
 .item { font-size: calc(clamp(2rem, 5vw, 4.5rem) * var(--fs, 1)); font-weight: 600; white-space: pre-line; padding: clamp(18px, 3vw, 36px) clamp(28px, 4vw, 56px); border-radius: 18px; background: #ffffff1f; border: 1px solid #ffffff33 }
 
 /* 3-2-1 and the answer timer */
@@ -219,3 +225,9 @@ option { color: #000 }
 @media (max-width: 860px) { .stage, .pt { grid-template-columns: 1fr } }
 .tiny { padding: 4px 10px }
 .row .opts { margin: 0 }
+
+/* phone: the clue above the buzzer (when the host turns it on) */
+.pclue { margin: 6px 0 14px; padding: 12px; border-radius: 18px; background: #ffffff14; border: 1px solid #ffffff22 }
+.pclue .pq { font-size: 1.3rem; font-weight: 700; white-space: pre-line; word-break: break-word }
+.pclue .item { font-size: 1.1rem; padding: 10px 14px; margin-top: 8px }
+.pclue img { display: block; margin: 8px auto 0; max-width: 100%; max-height: 38vh; border-radius: 12px }

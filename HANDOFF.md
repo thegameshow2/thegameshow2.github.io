@@ -81,6 +81,10 @@ Cleanup:
 ## 8b. Mode refactor (later the same day)
 Game-mode logic moved out of 4 pages into `modes/`. Public board no longer includes clue questions (they are sent only when a clue is picked). Display stays pixel-identical; a throwaway third mode was added in a test with one new file and two registry lines.
 
+## 8c. Clues on phones + bigger images
+- Host panel has a "Show clues on players' phones" checkbox, stored at `rooms/{room}/showOnPhones` (default off). When on, phones show the clue's text and images above the buzzer from the moment buzzers open (same moment the big screen ends its 3-2-1). Audio stays on the big screen. Answers are never in the room data.
+- Big screen: image clues are up to ~47% bigger (cap 55vh -> 84vh). Clues with an image get a compact title/status (`.overlay.has-img`) so the picture gets the room. Editor uploads now shrink to 1400px (was 900px) so enlarged images stay sharp; older uploads stay 900px.
+
 ## 9. Testing note
 This pass was tested in a real browser against a mocked Firebase (host + display + phone together, tier and Jeopardy boards, penalties, timer timeout, correct -> leaderboard -> winner screen, editor save/guard/collapse). It has still **not** run against the real Firebase, so on first deploy please check: sounds, teams, drag-reorder in the editor, upload of image and audio.
 
