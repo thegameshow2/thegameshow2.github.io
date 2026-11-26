@@ -55,8 +55,12 @@ function render() {
 }
 // text and images only (audio plays on the big screen); answers are never in the clue the room receives
 const src = i => i.v.startsWith("db:") ? (media[i.v.slice(3)] || "") : i.v;
-const clueHtml = c => (c.question ? `<div class="pq">${esc(c.question)}</div>` : "")
-  + arr(c.items).map(i => i.type === "image" ? `<img src="${esc(src(i))}" referrerpolicy="no-referrer" alt="">` : i.type === "text" ? `<div class="item">${esc(i.v)}</div>` : "").join("");
+const clueHtml = c => {
+  const its = arr(c.items), imgs = its.filter(i => i.type === "image");
+  return (c.question ? `<div class="pq">${esc(c.question)}</div>` : "")
+    + its.filter(i => i.type === "text").map(i => `<div class="item">${esc(i.v)}</div>`).join("")
+    + (imgs.length ? `<div class="pimgs">${imgs.map(i => `<img src="${esc(src(i))}" referrerpolicy="no-referrer" alt="">`).join("")}</div>` : "");
+};
 function fillTeams() {
   const keep = $("tsel").value;
   $("tsel").hidden = !(teamsOn && Object.keys(teams).length);
