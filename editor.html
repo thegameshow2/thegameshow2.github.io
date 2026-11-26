@@ -13,7 +13,7 @@
   <div class="card row"><input id="bn" class="grow" placeholder="Board name"><span id="opts" class="opts"></span><button id="save" class="good">Save</button><span id="msg" class="small"></span></div>
   <div id="cats"></div>
   <input id="file" type="file" hidden>
-  <button id="cola" class="bad">Collapse all</button><button id="expa" class="bad">Expand all</button> <button id="addcat">+ Add category</button>
+  <button id="cola" class="bad">Collapse all</button><button id="expa" class="bad">Expand all</button> <span id="catadd"></span>
  </div>
 </div>
 </main>
@@ -56,8 +56,6 @@ const readAudio = f => new Promise((res, rej) => {
 // ----- markup helpers -----
 // D("answer", i, j) -> data-c="i" data-q="j" data-f="answer": tells the input handler which field of which object it edits
 const D = (f, ...ix) => ["c", "q", "i"].slice(0, ix.length).map((k, n) => `data-${k}="${ix[n]}"`).join(" ") + ` data-f="${f}"`;
-const TYPES = ["text", "image", "audio"];
-const opts = (list, sel) => list.map(t => `<option${t === sel ? " selected" : ""}>${t}</option>`).join("");
 const X = (k, label = "✕") => `<button class="bad" data-x="${k}">${label}</button>`;     // remove / add buttons: data-x = <action letter><indexes>
 const DL = (i, j) => `data-dl="c${i}" data-di="${j}"`;                                   // drag-and-drop target: list "c<i>" (clues of category i), position j
 const HD = `<span class="dh" draggable="true" title="Drag to reorder">⠿</span>`;
@@ -66,20 +64,26 @@ const objOf = k => { const [a, b] = k.slice(1).split("."); return b === undefine
 const TG = k => `<button class="bad tg" data-tg="${k}" title="Collapse / expand">${folded.has(objOf(k)) ? "▸" : "▾"}</button>`;
 const mediaInput = (d, v, i, j, k) => `<input class="grow" ${d} value="${esc(v || "")}" placeholder="Paste a link / upload →"><button class="bad" data-up="${[i, j, k].filter(x => x !== undefined).join("-")}">Upload</button>`;
 
-const kit = { D, TYPES, opts, X, DL, HD, TG, mediaInput, folded, esc };   // handed to each mode's editor hooks
+// radio buttons for a clue's type. `attrs` = D(...) for a clue row (edits that field), or "" for an adder (read on click)
+const radios = (attrs, name, sel, types = modeOf(cur).types) => `<span class="radios">${types.map(t => `<label class="rad"><input type="radio" name="${name}" value="${t}" ${attrs}${t === sel ? " checked" : ""}> ${t[0].toUpperCase() + t.slice(1)}</label>`).join("")}</span>`;
+// "add N of this type" control. Remembers the last count and type you used.
+const pref = { count: 1, type: "text" };
+const adder = (key, label, hint = "") => `<span class="adder"><input type="number" class="num" min="1" max="100" value="${pref.count}" title="How many to add"> ${radios("", "add-" + key, pref.type)} <button data-x="${key}">${label}</button>${hint ? `<span class="small">${hint}</span>` : ""}</span>`;
+let kit = null;   // handed to each mode's editor hooks; rebuilt on every draw
+const makeKit = m => ({ D, types: m.types, radios, adder, X, DL, HD, TG, mediaInput, folded, esc });
 const optHtml = (o, v) => o.type === "checkbox"
   ? `<label><input type="checkbox" data-opt="${o.key}"${v ? " checked" : ""}> ${o.label}</label>`
   : `<label>${o.label} <input type="number" class="num" data-opt="${o.key}" min="${o.min ?? ""}" max="${o.max ?? ""}" value="${v}"></label>`;
 function category(c, i, m) {
-  const body = folded.has(c) ? "" : c.clues.map((q, j) => m.entry(q, i, j, kit)).join("") + `<button data-x="a${i}">+ Add ${m.entryLabel}</button>`;
+  const body = folded.has(c) ? "" : c.clues.map((q, j) => m.entry(q, i, j, kit)).join("") + adder("a" + i, "+ Add " + m.entryLabel);
   return `<div class="card" data-dl="c" data-di="${i}"><div class="row">${HD}${TG("c" + i)}${m.head(c, i, kit)}${X("c" + i, "Remove")}</div>${body}</div>`;
 }
 function draw() {
   $("ed").hidden = !cur; if (!cur) return;
-  const m = modeOf(cur);
+  const m = modeOf(cur); kit = makeKit(m);
   $("bn").value = cur.name;
   $("opts").innerHTML = m.options.map(o => optHtml(o, o.def(cur))).join("");
-  $("addcat").textContent = "+ Add " + m.catLabel;
+  $("catadd").innerHTML = adder("A", "+ Add " + m.catLabel, `each starts with 1 ${m.entryLabel} of this type`);
   $("cats").innerHTML = cur.categories.map((c, i) => category(c, i, m)).join("");
 }
 
@@ -110,7 +114,6 @@ $("opts").addEventListener("input", e => {   // board-level settings declared by
   const k = e.target.dataset.opt; if (!k) return;
   cur[k] = e.target.type === "checkbox" ? e.target.checked : Number(e.target.value) || 0; touch();
 });
-$("addcat").onclick = () => { cur.categories.push(modeOf(cur).newCategory(cur.categories.length)); touch(); draw(); };
 $("cola").onclick = () => { cur.categories.forEach(c => c.clues.forEach(q => folded.add(q))); draw(); };
 $("expa").onclick = () => { cur.categories.forEach(c => { folded.delete(c); c.clues.forEach(q => folded.delete(q)); }); draw(); };
 
@@ -121,7 +124,7 @@ $("cats").oninput = e => {
   t[d.f] = ["value", "points", "penalty"].includes(d.f) ? Number(e.target.value) || 0 : e.target.value;
   touch(); if (d.f === "type") draw();
 };
-$("cats").onclick = e => {
+function onAction(e) {
   const b = e.target.closest("button"), d = b?.dataset; if (!d) return;
   if (d.tg) { const o = objOf(d.tg); folded.has(o) ? folded.delete(o) : folded.add(o); draw(); return; }
   if (d.up) {
@@ -129,13 +132,21 @@ $("cats").onclick = e => {
     $("file").accept = (k === undefined ? cl : cl.items[k]).type === "audio" ? "audio/*" : "image/*"; $("file").click(); return;
   }
   const x = d.x; if (!x) return;
-  const n = x.slice(1).split("-").map(Number), cats = cur.categories;
-  if (x[0] === "c") cats.splice(n[0], 1);
-  if (x[0] === "q") cats[n[0]].clues.splice(n[1], 1);
-  if (x[0] === "a") cats[n[0]].clues.push(modeOf(cur).newEntry(cats[n[0]]));
-  else if (!["c", "q"].includes(x[0])) modeOf(cur).action?.(cur, x[0], n);   // anything else is a button the mode added
+  const m = modeOf(cur), n = x.slice(1).split("-").map(Number), cats = cur.categories;
+  let o = { count: 1, type: m.types[0] };
+  const ad = b.closest(".adder");
+  if (ad) {   // an "add N of this type" control: read the count and the chosen type, and remember them
+    o = { count: Math.max(1, Math.min(100, Number(ad.querySelector("input[type=number]").value) || 1)), type: ad.querySelector("input[type=radio]:checked")?.value || m.types[0] };
+    Object.assign(pref, o);
+  }
+  if (x[0] === "A") for (let k = 0; k < o.count; k++) cats.push(m.newCategory(cats.length, o.type));
+  else if (x[0] === "a") for (let k = 0; k < o.count; k++) cats[n[0]].clues.push(m.newEntry(cats[n[0]], o.type));
+  else if (x[0] === "c") cats.splice(n[0], 1);
+  else if (x[0] === "q") cats[n[0]].clues.splice(n[1], 1);
+  else m.action?.(cur, x[0], n, o);   // anything else is a button the mode added
   touch(); draw();
-};
+}
+$("cats").onclick = onAction; $("catadd").onclick = onAction;
 $("file").onchange = async e => {
   const f = e.target.files[0]; e.target.value = ""; if (!f || !upK) return;
   const [i, j, k] = upK.split("-").map(Number), cl = cur.categories[i].clues[j], it = k === undefined ? cl : cl.items[k], fld = k === undefined ? "media" : "v";

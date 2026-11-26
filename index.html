@@ -14,8 +14,10 @@
  </main>
  <button id="snd" class="bad corner">🔊 Click once to enable sound</button>
  <button id="mute" class="bad corner" hidden>🔊</button>
- <aside class="side card"><h2>Scores</h2><div id="sb"></div></aside>
+ <aside class="side card"><h2>Scores</h2><div id="sb"></div>
+  <div class="joinbox"><h2>Scan to join</h2><div id="qr"></div></div></aside>
 </div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script type="module">
 import { onValue, R, $, room, esc, norm, arr, modeOf, tileKeys, byScore, sleep, setHtml, paintBoard, audioHtml, bindAudio, dot, COUNT_STEP } from "./common.js";
 import { SFX, ctx, sfx } from "./sound.js";
@@ -62,6 +64,8 @@ watch("buzz", v => {
 watch("used", v => { used = v || {}; render(); if (!allDone()) { if (winOn) hideWinner(); } else setTimeout(maybeWinner, 1500); });
 watch("start", () => { if (firstStart) { firstStart = false; return; } sfx("start"); hideWinner(); });   // host pressed Load board / New game
 $("rmv").textContent = room;
+try { const q = qrcode(0, "M"); q.addData(new URL("play.html?room=" + room, location.href).href); q.make(); $("qr").innerHTML = q.createImgTag(6, 0); }   // players scan this to join
+catch (e) { $("qr").parentElement.hidden = true; }
 
 // ----- answer timer (started by the host after a buzz) -----
 let tmLive = 0, firstTimer = true, toT = 0;

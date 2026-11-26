@@ -19,9 +19,9 @@ body {
 }
 [hidden] { display: none !important }
 .wrap { max-width: 1200px; margin: auto; padding: 20px }
+.wrap.wide { max-width: 1800px; padding-bottom: var(--dock-h, 360px) }   /* host: full width, with room under the content for the floating bar */
 .center { text-align: center }
 .narrow { max-width: 420px; margin: auto }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px }
 .grow { flex: 1; min-width: 140px }
 .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0 }
 h1 { font-size: 2rem; font-weight: 800; margin: .3em 0 .6em; background: var(--g); -webkit-background-clip: text; background-clip: text; color: transparent }
@@ -65,6 +65,20 @@ option { color: #000 }
 .opts label { display: flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--muted) }
 #val { color: var(--ok) }
 #pen { color: var(--no) }
+
+/* floating control bar (host): always at the bottom centre, QR box on its left */
+.dock { position: fixed; z-index: 20; left: 50%; bottom: 12px; transform: translateX(-50%); display: flex; align-items: stretch; gap: 12px; width: min(1180px, calc(100vw - 24px)) }
+.dock .card { margin: 0; background: linear-gradient(135deg, #2c1a60f2, #160b3af2); box-shadow: 0 14px 50px #000a, inset 0 1px #ffffff55 }
+.dockqr { flex: 0 0 188px; padding: 12px; text-align: center }
+.dockqr h2 { margin-bottom: 8px; font-size: .8rem }
+.dockqr p { margin: 6px 0 0 }
+.dockqr #link { font-size: .62rem }
+.dockmain { flex: 1; min-width: 0; padding: 12px 18px; max-height: 58vh; overflow: auto }
+.dockmain h2 { margin-bottom: 6px; font-size: .8rem }
+.dockmain .clue { font-size: 1.05rem; margin: 4px 0 }
+.dockmain .status { font-size: 1.25rem; margin: 4px 0 }
+.dockmain .row { margin: 8px 0 }
+@media (max-width: 860px) { .dock { flex-direction: column } .dockqr { flex: none; display: none } }
 
 /* ===== phone ===== */
 .buzz { width: min(78vw, 320px); aspect-ratio: 1; border-radius: 50%; font-size: 2.4rem; font-weight: 800; letter-spacing: .08em; border: 2px solid #ffffff66; background: radial-gradient(circle at 30% 25%, #f9a8d4, #ec4899 40%, #7c3aed 85%); box-shadow: 0 0 70px #ec489988, inset 0 4px 14px #ffffff66 }
@@ -234,3 +248,15 @@ option { color: #000 }
 .pimgs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px }
 .pimgs img { width: 100%; height: auto; max-height: 30vh; object-fit: contain; border-radius: 12px; background: #0003 }
 .pimgs img:only-child { grid-column: 1 / -1; max-height: 38vh }   /* one picture: full width */
+
+/* editor: radio buttons for the clue type, and the "add N of this type" control */
+input[type=radio], input[type=checkbox] { accent-color: #8b5cf6 }
+.radios { display: inline-flex; align-items: center; gap: 12px; padding: 0 4px }
+.rad { display: inline-flex; align-items: center; gap: 5px; font-size: .85rem; cursor: pointer; white-space: nowrap }
+.rad input { margin: 0; padding: 0 }
+.adder { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; margin: 6px 0; padding: 6px 10px; border-radius: 14px; background: #ffffff0d; border: 1px solid #ffffff1f }
+.adder .num { width: 70px; padding: 6px 8px }
+
+/* big screen: join QR under the scoreboard */
+.joinbox { margin-top: 18px; text-align: center }
+.joinbox h2 { margin-bottom: 10px }
