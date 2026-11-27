@@ -260,3 +260,26 @@ input[type=radio], input[type=checkbox] { accent-color: #8b5cf6 }
 /* big screen: join QR under the scoreboard */
 .joinbox { margin-top: 18px; text-align: center }
 .joinbox h2 { margin-bottom: 10px }
+.sbh { margin: 14px 0 2px; font-size: .75rem; font-weight: 800; letter-spacing: .16em; text-transform: uppercase; color: var(--lilac) }
+.sbh:first-child { margin-top: 0 }
+
+/* phone: the board and a few scores while buzzers are closed (host option) */
+.pboard { max-width: 520px; margin: 8px auto }
+.pboard .board { gap: 6px }
+.pboard .cat { font-size: .6rem; padding: 8px 2px; letter-spacing: .03em }
+.pboard .tile { font-size: 1.1rem; padding: 14px 0; border-radius: 10px }
+.pboard .rung { padding: 8px 10px; gap: 10px; border-radius: 14px }
+.pboard .rung + .rung { margin-top: 22px }
+.pboard .rung + .rung::before { top: -22px; height: 22px }
+.pboard .rt { flex-basis: 26% }
+.pboard .rt b { font-size: .8rem }
+.pboard .rt span { font-size: .7rem }
+.pboard .ladder { --nw: 34px; --nh: 34px; --gap: 8px }
+.pboard .ladder.caps { --nw: 90px }
+.pboard .node { font-size: .85rem }
+.pboard .ladder.caps .node { font-size: .7rem }
+.ps { display: grid; gap: 6px; margin-top: 12px }
+.pr { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 12px; background: #ffffff14; border: 1px solid #ffffff22; text-align: left }
+.pr b { color: var(--cyan); width: 1.2em }
+.pr span { flex: 1; font-weight: 600 }
+.pr em { font-style: normal; font-weight: 800; color: var(--gold) }

@@ -9,6 +9,10 @@ export const sleep = ms => new Promise(r => setTimeout(r, ms));
 export const parseKey = k => String(k).split("-").map(Number);        // "2-3" -> [2, 3]  (category/tier index, clue/level index)
 export const byNum = (a, b) => a[1].num - b[1].num;                   // sort helper for Object.entries(players)
 export const byScore = (a, b) => b[1].score - a[1].score || a[1].num - b[1].num;
+// team scores, best first: a team's score is the sum of its players' scores (used by the big screen and the phones)
+export const teamTotals = (players, teams) => Object.entries(teams || {})
+  .map(([id, t]) => ({ id, t, score: Object.values(players || {}).filter(p => p.team === id).reduce((a, p) => a + p.score, 0) }))
+  .sort((a, b) => b.score - a.score);
 export const nextNum = players => Math.max(0, ...Object.values(players).map(p => p.num)) + 1;
 
 // all tile keys of a board made of categories x clues, e.g. ["0-0","0-1","1-0"]

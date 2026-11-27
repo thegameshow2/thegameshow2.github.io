@@ -19,7 +19,7 @@
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script type="module">
-import { onValue, R, $, room, esc, norm, arr, modeOf, tileKeys, byScore, sleep, setHtml, paintBoard, audioHtml, bindAudio, dot, COUNT_STEP } from "./common.js";
+import { onValue, R, $, room, esc, norm, arr, modeOf, tileKeys, byScore, teamTotals, sleep, setHtml, paintBoard, audioHtml, bindAudio, dot, COUNT_STEP } from "./common.js";
 import { SFX, ctx, sfx } from "./sound.js";
 
 // ===== TIMINGS (milliseconds): edit these numbers to tune the animations =====
@@ -218,9 +218,13 @@ function renderClue() {
 // ----- scoreboard + render -----
 function renderScores() {
   const list = Object.entries(players).sort(byScore);
-  setHtml($("sb"), list.length
-    ? list.map(([id, p], i) => `<div class="sb${id === buzz.winner ? " hot" : ""}${buzz.out?.[id] ? " out" : ""}"><b>${i + 1}</b><span class="n">${tdot(p)}${esc(p.name)}</span><span class="s">${p.score}</span></div>`).join("")
-    : '<p class="small">Waiting for players…<br>Open this page from the host panel link.</p>');
+  const useTeams = teamsOn && Object.keys(teams).length;                    // teams only appear while team mode is on
+  const win = players[buzz.winner]?.team;
+  const teamRows = useTeams ? teamTotals(players, teams) : [];
+  const head = txt => useTeams ? `<div class="sbh">${txt}</div>` : "";
+  const html = (useTeams ? head("Teams") + teamRows.map((r, i) => `<div class="sb${r.id === win ? " hot" : ""}"><b>${i + 1}</b><span class="n"><i class="dot" style="background:${esc(r.t.color)}"></i>${esc(r.t.name)}</span><span class="s">${r.score}</span></div>`).join("") + head("Players") : "")
+    + list.map(([id, p], i) => `<div class="sb${id === buzz.winner ? " hot" : ""}${buzz.out?.[id] ? " out" : ""}"><b>${i + 1}</b><span class="n">${tdot(p)}${esc(p.name)}</span><span class="s">${p.score}</span></div>`).join("");
+  setHtml($("sb"), html || '<p class="small">Waiting for players…<br>Open this page from the host panel link.</p>');
 }
 function render() { paintBoard($("board"), board, used); renderClue(); renderScores(); }
 

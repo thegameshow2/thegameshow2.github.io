@@ -33,6 +33,7 @@
    <label>Penalty (wrong) <input id="pen" class="num" type="number" value="200" step="50"></label>
    <label><input id="auto" type="checkbox"> Open buzzers automatically when a clue is picked</label>
    <label><input id="phones" type="checkbox"> Show clues on players' phones</label>
+   <label><input id="mirror" type="checkbox"> Show the board + scores on phones while buzzers are closed</label>
    <label><input id="tm" type="checkbox"> Answer timer after a buzz</label>
    <label>Seconds <input id="tmv" class="num" type="number" min="1" max="300"></label>
   </div>
@@ -108,6 +109,8 @@ watch("clue", v => {
 // ----- clues on phones: a room-level switch; phones read it and show the clue above the buzzer -----
 watch("showOnPhones", v => { $("phones").checked = !!v; });
 $("phones").onchange = () => set(R("showOnPhones"), $("phones").checked);
+watch("showBoardOnPhones", v => { $("mirror").checked = !!v; });
+$("mirror").onchange = () => set(R("showBoardOnPhones"), $("mirror").checked);
 
 // ----- answer timer: runs here, so this panel must stay open -----
 let tmId = null, tmT = null, tmClr = null;
