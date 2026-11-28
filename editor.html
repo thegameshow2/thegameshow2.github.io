@@ -9,6 +9,7 @@
   <div class="row"><select id="sel"></select><span id="newbtns"></span><button id="dup" class="bad">Duplicate</button><button id="del" class="bad">Delete</button></div>
   <div class="row"><label class="small">Import JSON <input id="imp" type="file" accept=".json"></label><button id="exp" class="bad">Export</button><a href="host.html">← Host panel</a><button id="out" class="bad">Sign out</button></div>
  </div>
+ <p id="fatal" class="status" hidden></p>
  <div id="ed" hidden>
   <div class="card row"><input id="bn" class="grow" placeholder="Board name"><span id="opts" class="opts"></span><button id="save" class="good">Save</button><span id="msg" class="small"></span></div>
   <div id="cats"></div>
@@ -65,12 +66,15 @@ const TG = k => `<button class="bad tg" data-tg="${k}" title="Collapse / expand"
 const mediaInput = (d, v, i, j, k) => `<input class="grow" ${d} value="${esc(v || "")}" placeholder="Paste a link / upload →"><button class="bad" data-up="${[i, j, k].filter(x => x !== undefined).join("-")}">Upload</button>`;
 
 // radio buttons for a clue's type. `attrs` = D(...) for a clue row (edits that field), or "" for an adder (read on click)
-const radios = (attrs, name, sel, types = modeOf(cur).types) => `<span class="radios">${types.map(t => `<label class="rad"><input type="radio" name="${name}" value="${t}" ${attrs}${t === sel ? " checked" : ""}> ${t[0].toUpperCase() + t.slice(1)}</label>`).join("")}</span>`;
+// older mode files may not declare `types`; fall back to the standard three
+const typesOf = m => m.types || ["text", "image", "audio"];
+const radios = (attrs, name, sel, types = typesOf(modeOf(cur))) => `<span class="radios">${types.map(t => `<label class="rad"><input type="radio" name="${name}" value="${t}" ${attrs}${t === sel ? " checked" : ""}> ${t[0].toUpperCase() + t.slice(1)}</label>`).join("")}</span>`;
 // "add N of this type" control. Remembers the last count and type you used.
 const pref = { count: 1, type: "text" };
 const adder = (key, label, hint = "") => `<span class="adder"><input type="number" class="num" min="1" max="100" value="${pref.count}" title="How many to add"> ${radios("", "add-" + key, pref.type)} <button data-x="${key}">${label}</button>${hint ? `<span class="small">${hint}</span>` : ""}</span>`;
 let kit = null;   // handed to each mode's editor hooks; rebuilt on every draw
-const makeKit = m => ({ D, types: m.types, radios, adder, X, DL, HD, TG, mediaInput, folded, esc });
+// TYPES + opts (dropdown helper) are kept so mode files from before the radio-button update still draw
+const makeKit = m => ({ D, types: typesOf(m), TYPES: typesOf(m), opts: (list, sel) => list.map(t => `<option${t === sel ? " selected" : ""}>${t}</option>`).join(""), radios, adder, X, DL, HD, TG, mediaInput, folded, esc });
 const optHtml = (o, v) => o.type === "checkbox"
   ? `<label><input type="checkbox" data-opt="${o.key}"${v ? " checked" : ""}> ${o.label}</label>`
   : `<label>${o.label} <input type="number" class="num" data-opt="${o.key}" min="${o.min ?? ""}" max="${o.max ?? ""}" value="${v}"></label>`;
@@ -79,6 +83,14 @@ function category(c, i, m) {
   return `<div class="card" data-dl="c" data-di="${i}"><div class="row">${HD}${TG("c" + i)}${m.head(c, i, kit)}${X("c" + i, "Remove")}</div>${body}</div>`;
 }
 function draw() {
+  try { drawBoard(); $("fatal").hidden = true; }
+  catch (err) {   // a half-drawn editor looks like lost data: say what happened instead
+    console.error(err);
+    $("fatal").hidden = false;
+    $("fatal").textContent = "The editor couldn't draw this board (" + err.message + "). Your data is safe. This usually means one site file is an older version: re-upload editor.html, style.css and the whole modes folder (index.js, jeopardy.js, tier.js).";
+  }
+}
+function drawBoard() {
   $("ed").hidden = !cur; if (!cur) return;
   const m = modeOf(cur); kit = makeKit(m);
   $("bn").value = cur.name;
@@ -133,10 +145,10 @@ function onAction(e) {
   }
   const x = d.x; if (!x) return;
   const m = modeOf(cur), n = x.slice(1).split("-").map(Number), cats = cur.categories;
-  let o = { count: 1, type: m.types[0] };
+  let o = { count: 1, type: typesOf(m)[0] };
   const ad = b.closest(".adder");
   if (ad) {   // an "add N of this type" control: read the count and the chosen type, and remember them
-    o = { count: Math.max(1, Math.min(100, Number(ad.querySelector("input[type=number]").value) || 1)), type: ad.querySelector("input[type=radio]:checked")?.value || m.types[0] };
+    o = { count: Math.max(1, Math.min(100, Number(ad.querySelector("input[type=number]").value) || 1)), type: ad.querySelector("input[type=radio]:checked")?.value || typesOf(m)[0] };
     Object.assign(pref, o);
   }
   if (x[0] === "A") for (let k = 0; k < o.count; k++) cats.push(m.newCategory(cats.length, o.type));
